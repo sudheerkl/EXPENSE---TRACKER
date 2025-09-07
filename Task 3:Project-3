@@ -1,1 +1,221 @@
+#!/usr/bin/env python3
+"""
+Project :- 3
+Personal Expense Manager (GUI + Database + Charts)
+
+Features:
+- Add, view, and delete expenses
+- Store expenses in SQLite database
+- Show summary by category
+- Display monthly expense chart (Matplotlib)
+- Simple Tkinter GUI interface
+"""
+
+import sqlite3
+import tkinter as tk
+from tkinter import ttk, messagebox
+from datetime import datetime
+import matplotlib.pyplot as plt
+
+DB_NAME = "expenses.db"
+
+# ---------------- DATABASE FUNCTIONS ----------------
+def init_db():
+    """Initialize SQLite database"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS expenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT,
+            amount REAL,
+            category TEXT,
+            description TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def add_expense_db(amount, category, description):
+    """Insert a new expense"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute("INSERT INTO expenses (date, amount, category, description) VALUES (?, ?, ?, ?)",
+                   (date, amount, category, description))
+    conn.commit()
+    conn.close()
+
+def get_all_expenses():
+    """Retrieve all expenses"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM expenses ORDER BY date DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def delete_expense_db(expense_id):
+    """Delete expense by ID"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM expenses WHERE id=?", (expense_id,))
+    conn.commit()
+    conn.close()
+
+def get_summary_by_category():
+    """Return total amount grouped by category"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT category, SUM(amount) FROM expenses GROUP BY category")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+# ---------------- GUI FUNCTIONS ----------------
+def add_expense():
+    """Handle add expense from GUI"""
+    try:
+        amount = float(amount_entry.get())
+        category = category_entry.get().title()
+        description = description_entry.get()
+
+        if not category:
+            messagebox.showerror("Error", "Category cannot be empty!")
+            return
+
+        add_expense_db(amount, category, description)
+        messagebox.showinfo("Success", "Expense added successfully!")
+        amount_entry.delete(0, tk.END)
+        category_entry.delete(0, tk.END)
+        description_entry.delete(0, tk.END)
+        refresh_expense_list()
+    except ValueError:
+        messagebox.showerror("Error", "Invalid amount!")
+
+def refresh_expense_list():
+    """Reload expense data in Treeview"""
+    for row in expense_tree.get_children():
+        expense_tree.delete(row)
+    rows = get_all_expenses()
+    for row in rows:
+        expense_tree.insert("", tk.END, values=row)
+
+def delete_expense():
+    """Delete selected expense"""
+    selected = expense_tree.selection()
+    if not selected:
+        messagebox.showwarning("Warning", "Select an expense to delete!")
+        return
+    item = expense_tree.item(selected[0])
+    expense_id = item["values"][0]
+    delete_expense_db(expense_id)
+    messagebox.showinfo("Deleted", "Expense deleted successfully!")
+    refresh_expense_list()
+
+def show_summary():
+    """Show summary by category"""
+    rows = get_summary_by_category()
+    if not rows:
+        messagebox.showinfo("Summary", "No expenses recorded yet!")
+        return
+    summary_text = "\n".join([f"{cat}: ₹{amt:.2f}" for cat, amt in rows])
+    messagebox.showinfo("Expense Summary", summary_text)
+
+def show_chart():
+    """Show pie chart of expenses by category"""
+    rows = get_summary_by_category()
+    if not rows:
+        messagebox.showinfo("Chart", "No expenses recorded yet!")
+        return
+
+    categories = [r[0] for r in rows]
+    amounts = [r[1] for r in rows]
+
+    plt.figure(figsize=(6,6))
+    plt.pie(amounts, labels=categories, autopct="%1.1f%%", startangle=90)
+    plt.title("Expenses by Category")
+    plt.show()
+
+# ---------------- MAIN APP ----------------
+init_db()
+
+root = tk.Tk()
+root.title("Personal Expense Manager")
+root.geometry("800x600")
+root.configure(bg="#f0f0f0")
+
+# ---- Input Frame ----
+frame_input = tk.Frame(root, bg="#d9e6f2", pady=10)
+frame_input.pack(fill="x")
+
+tk.Label(frame_input, text="Amount (₹):", bg="#d9e6f2").grid(row=0, column=0, padx=5, pady=5)
+amount_entry = tk.Entry(frame_input)
+amount_entry.grid(row=0, column=1, padx=5, pady=5)
+
+tk.Label(frame_input, text="Category:", bg="#d9e6f2").grid(row=0, column=2, padx=5, pady=5)
+category_entry = tk.Entry(frame_input)
+category_entry.grid(row=0, column=3, padx=5, pady=5)
+
+tk.Label(frame_input, text="Description:", bg="#d9e6f2").grid(row=0, column=4, padx=5, pady=5)
+description_entry = tk.Entry(frame_input, width=25)
+description_entry.grid(row=0, column=5, padx=5, pady=5)
+
+add_btn = tk.Button(frame_input, text="Add Expense", command=add_expense, bg="#4CAF50", fg="white")
+add_btn.grid(row=0, column=6, padx=10, pady=5)
+
+# ---- Expense List ----
+frame_list = tk.Frame(root, pady=10)
+frame_list.pack(fill="both", expand=True)
+
+columns = ("ID", "Date", "Amount", "Category", "Description")
+expense_tree = ttk.Treeview(frame_list, columns=columns, show="headings")
+for col in columns:
+    expense_tree.heading(col, text=col)
+    expense_tree.column(col, width=120)
+
+expense_tree.pack(fill="both", expand=True)
+
+# ---- Buttons ----
+frame_buttons = tk.Frame(root, pady=10, bg="#f0f0f0")
+frame_buttons.pack(fill="x")
+
+delete_btn = tk.Button(frame_buttons, text="Delete Selected", command=delete_expense, bg="#e74c3c", fg="white")
+delete_btn.pack(side="left", padx=10)
+
+summary_btn = tk.Button(frame_buttons, text="Show Summary", command=show_summary, bg="#3498db", fg="white")
+summary_btn.pack(side="left", padx=10)
+
+chart_btn = tk.Button(frame_buttons, text="Show Chart", command=show_chart, bg="#9b59b6", fg="white")
+chart_btn.pack(side="left", padx=10)
+
+exit_btn = tk.Button(frame_buttons, text="Exit", command=root.quit, bg="#2c3e50", fg="white")
+exit_btn.pack(side="right", padx=10)
+
+# Load initial data
+refresh_expense_list()
+
+root.mainloop()
+
+
+▶ How to Run
+
+Save the code in a file, e.g. expense_manager.py.
+
+Install matplotlib (if not already installed):
+pip install matplotlib
+Run the script:
+python expense_manager.py
+
+The app window will open. You can:
+
+Add expenses with Amount, Category, Description
+
+See all expenses in the table
+
+Delete selected expenses
+
+Show summary
+
+Show expense chart
 
